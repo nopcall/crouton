@@ -27,12 +27,10 @@ if [ -z "$TARGET" ]; then
 fi
 
 if [ "$TARGETS" = 'help' ]; then
-    if [ -n "$DESCRIPTION" ]; then
-        echo "$TARGET"
-        echo "	$DESCRIPTION"
-        if [ -n "$REQUIRES" ]; then
-            echo "	Requires: $REQUIRES"
-        fi
+    echo "$TARGET"
+    echo "	$DESCRIPTION"
+    if [ -n "$REQUIRES" ]; then
+        echo "	Requires: $REQUIRES"
     fi
 elif [ "$TARGETNOINSTALL" = "p" ]; then
     # This will check the provides from /etc/crouton/targets and targets
@@ -89,11 +87,6 @@ elif [ -z "$TARGETNOINSTALL" -o -n "$RESTOREHOSTBIN" ]; then
         $SIMULATE cp -fP "$src" "$CHROOT/etc/crouton/"
         [ ! -h "$src" ] && $SIMULATE chmod 644 "$CHROOT/etc/crouton/$f"
     done
-
-    # Copy all the source files to chroot
-    $SIMULATE rm -rf "$CHROOT/usr/src/crouton"
-    $SIMULATE cp -afP "${SRCDIR:-../src}" "$CHROOT/usr/src/crouton"
-
     # Print out the target file below the ### line.
     # This avoids having to escape everything like with cat<<EOF
     # All ### lines are ignored.
@@ -106,6 +99,7 @@ elif [ -z "$TARGETNOINSTALL" -o -n "$RESTOREHOSTBIN" ]; then
     if [ "${t#/}" = "$t" ]; then
         t="$TARGETSDIR/$t"
     fi
+    echo "markawk begin" 1>&2
     awk '
         (FNR == 1) {
             ok = 0;
@@ -127,6 +121,7 @@ elif [ -z "$TARGETNOINSTALL" -o -n "$RESTOREHOSTBIN" ]; then
         }
         ok;
     ' "$t"
+    echo "markawk end" 1>&2
 fi
 # Break out of the subshell.
 exit

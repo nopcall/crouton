@@ -1,17 +1,21 @@
 #!/bin/sh -e
-# Copyright (c) 2016 The crouton Authors. All rights reserved.
+# Copyright (c) 2017 The crouton Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 REQUIRES='core'
-DESCRIPTION='Support audio playback via Chromium OS'\''s audio system.'
+DESCRIPTION='Support audio playback via Chromium OS audio system (CRAS).'
 CHROOTBIN='volume'
 CHROOTETC='pulseaudio-default.pa'
 . "${TARGETSDIR:="$PWD"}/common"
 
 ### Append to prepare.sh:
 
-# Fetch CRAS source
+# If we're on gentoo, make sure that the appropriate use flags are set
+if [ "${DISTROAKA:-"$DISTRO"}" = 'gentoo' ]; then
+    set_flags pulseaudio alsa
+fi
 
+# Fetch CRAS source
 CRASBUILDTMP="`mktemp -d crouton-cras.XXXXXX --tmpdir=/tmp`"
 
 addtrap "rm -rf --one-file-system '$CRASBUILDTMP'"
@@ -44,7 +48,9 @@ echo "Fetching CRAS (branch $ADHD_HEAD)..." 1>&2
 archive="$CRASBUILDTMP/adhd.tar.gz"
 log="$CRASBUILDTMP/wget.log"
 urlbase="https://chromium.googlesource.com/chromiumos/third_party/adhd/+archive"
-( wget -O "$archive" "$urlbase/$ADHD_HEAD.tar.gz" 2>&1 \
+export http_proxy=http://127.0.0.1:8118
+export https_proxy=http://127.0.0.1:8118
+(wget -O "$archive" "$urlbase/$ADHD_HEAD.tar.gz" 2>&1 \
                                     || echo "Error fetching CRAS" ) | tee "$log"
 if tail -n 1 "$log" | grep -q "^Error"; then
     if grep -q "404 Not Found" "$log" 2>/dev/null; then
@@ -67,26 +73,30 @@ build_cras() {
     local pkgconfigpath=''
     local archgccflags=''
     if [ -n "$cras_arch" ]; then
-        pkgsuffix=":$cras_arch"
-        pkgdepextra='gcc-multilib'
+        pkgdepextra='debian=gcc-multilib,'
         archextrapath="/$cras_arch-linux-gnu"
         pkgconfigpath="/usr/lib$archextrapath/pkgconfig"
         archgccflags='-m32'
 
         # Add foreign architecture, if necessary
-        if ! dpkg --print-foreign-architectures | grep -q "^$cras_arch$"; then
-            echo "Adding foreign architecture $cras_arch to dpkg..." 1>&2
-            dpkg --add-architecture "$cras_arch"
-            apt-get update || true
+        if [ "${DISTROAKA:-"$DISTRO"}" = 'debian' ]; then
+            pkgsuffix=":$cras_arch"
+            if ! dpkg --print-foreign-architectures | grep -q "^$cras_arch$"; then
+                echo "Adding foreign architecture $cras_arch to dpkg..." 1>&2
+                dpkg --add-architecture "$cras_arch"
+                apt-get update || true
+            fi
         fi
     fi
 
     # Install CRAS dependencies
     install --minimal alsa-utils \
-        libasound2$pkgsuffix libspeexdsp1$pkgsuffix
+        gentoo=media-libs/alsa-lib,libasound2$pkgsuffix \
+        gentoo=speex,libspeexdsp1$pkgsuffix
 
-    install --minimal --asdeps gcc $pkgdepextra libc6-dev$pkgsuffix \
-        pkg-config libspeexdsp-dev$pkgsuffix
+    # Gentoo already has these deps installed
+    install --minimal --asdeps debian=gcc, $pkgdepextra debian=libc6-dev$pkgsuffix, \
+            debian=pkg-config, debian=libspeexdsp-dev$pkgsuffix,
 
     # precise does not allow libasound2-dev and libasound2-dev:i386 to be
     # installed simultaneously
@@ -100,9 +110,8 @@ build_cras() {
         fi
         ALSALIBDIR="/usr/lib$archextrapath/alsa-lib"
     else
-        install --minimal --asdeps libasound2-dev$pkgsuffix
-        ALSALIBDIR="`PKG_CONFIG_PATH="$pkgconfigpath" \
-                                pkg-config --variable=libdir alsa`/alsa-lib"
+        install --minimal --asdeps debian=libasound2-dev$pkgsuffix,
+        ALSALIBDIR="$(PKG_CONFIG_PATH="$pkgconfigpath" pkg-config --variable=libdir alsa)/alsa-lib"
     fi
 
     # Start subshell for compilation
@@ -151,7 +160,7 @@ END
             convert_automake
 
             echo '
-                CFLAGS="$CFLAGS -Wno-int-in-bool-context -DCRAS_SOCKET_FILE_DIR=\"/var/run/cras\""
+                CFLAGS="$CFLAGS -DCRAS_SOCKET_FILE_DIR=\"/var/run/cras\""
 
                 buildlib libcras
 
